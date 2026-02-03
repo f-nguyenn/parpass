@@ -1239,19 +1239,26 @@ app.post('/api/notifications/broadcast', async (req, res) => {
       return res.status(400).json({ error: 'Title and body are required' });
     }
 
-    const result = await notifications.sendToAllMembers(title, body, data);
-
-    // Log the notification
-    await notifications.logNotification(
+    // Create log entry first to get ID for member-level tracking
+    const logId = await notifications.logNotification(
       'broadcast',
       title,
       body,
       null,
-      result.sent + result.failed,
-      result.failed === 0 ? 'sent' : 'partial',
-      result.sent,
-      result.failed
+      0,  // Will be updated
+      'pending',
+      0,
+      0
     );
+
+    const result = await notifications.sendToAllMembers(title, body, data, logId);
+
+    // Update the log with final counts
+    await db.query(`
+      UPDATE notification_log
+      SET recipient_count = $1, sent_count = $2, failed_count = $3, status = $4
+      WHERE id = $5
+    `, [result.sent + result.failed, result.sent, result.failed, result.failed === 0 ? 'sent' : 'partial', logId]);
 
     res.json({
       success: true,
@@ -1324,19 +1331,26 @@ app.post('/api/notifications/targeted', async (req, res) => {
       return res.status(400).json({ error: 'Title, body, and criteria are required' });
     }
 
-    const result = await notifications.sendByCriteria(criteria, title, body, data);
-
-    // Log the notification
-    await notifications.logNotification(
+    // Create log entry first to get ID for member-level tracking
+    const logId = await notifications.logNotification(
       'targeted',
       title,
       body,
       criteria,
-      result.sent + result.failed,
-      result.failed === 0 ? 'sent' : 'partial',
-      result.sent,
-      result.failed
+      0,
+      'pending',
+      0,
+      0
     );
+
+    const result = await notifications.sendByCriteria(criteria, title, body, data, logId);
+
+    // Update the log with final counts
+    await db.query(`
+      UPDATE notification_log
+      SET recipient_count = $1, sent_count = $2, failed_count = $3, status = $4
+      WHERE id = $5
+    `, [result.sent + result.failed, result.sent, result.failed, result.failed === 0 ? 'sent' : 'partial', logId]);
 
     res.json({
       success: true,
@@ -1391,19 +1405,26 @@ app.post('/api/notifications/member/:memberId', async (req, res) => {
       return res.status(400).json({ error: 'Title and body are required' });
     }
 
-    const result = await notifications.sendToMember(memberId, title, body, data);
-
-    // Log the notification
-    await notifications.logNotification(
+    // Create log entry first to get ID for member-level tracking
+    const logId = await notifications.logNotification(
       'individual',
       title,
       body,
       { memberId },
       1,
-      result.success ? 'sent' : 'failed',
-      result.success ? 1 : 0,
-      result.success ? 0 : 1
+      'pending',
+      0,
+      0
     );
+
+    const result = await notifications.sendToMember(memberId, title, body, data, logId);
+
+    // Update the log with final status
+    await db.query(`
+      UPDATE notification_log
+      SET sent_count = $1, failed_count = $2, status = $3
+      WHERE id = $4
+    `, [result.success ? 1 : 0, result.success ? 0 : 1, result.success ? 'sent' : 'failed', logId]);
 
     res.json(result);
   } catch (err) {
@@ -1482,6 +1503,94 @@ app.get('/api/notifications/stats', async (req, res) => {
   } catch (err) {
     console.error('Notification stats error:', err);
     res.status(500).json({ error: 'Failed to fetch notification stats' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/members/{memberId}/notifications:
+ *   get:
+ *     summary: Get notification history for a specific member
+ *     tags: [Notifications]
+ *     parameters:
+ *       - in: path
+ *         name: memberId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *     responses:
+ *       200:
+ *         description: List of notifications for the member
+ */
+app.get('/api/members/:memberId/notifications', async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const { limit = 50 } = req.query;
+
+    const result = await notifications.getMemberNotifications(memberId, parseInt(limit));
+    res.json(result);
+  } catch (err) {
+    console.error('Member notifications error:', err);
+    res.status(500).json({ error: 'Failed to fetch member notifications' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/members/{memberId}/notifications/unread-count:
+ *   get:
+ *     summary: Get unread notification count for a member
+ *     tags: [Notifications]
+ *     parameters:
+ *       - in: path
+ *         name: memberId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Unread notification count
+ */
+app.get('/api/members/:memberId/notifications/unread-count', async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const count = await notifications.getUnreadCount(memberId);
+    res.json({ unreadCount: count });
+  } catch (err) {
+    console.error('Unread count error:', err);
+    res.status(500).json({ error: 'Failed to fetch unread count' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/notifications/{notificationId}/read:
+ *   post:
+ *     summary: Mark a notification as read
+ *     tags: [Notifications]
+ *     parameters:
+ *       - in: path
+ *         name: notificationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Notification marked as read
+ */
+app.post('/api/notifications/:notificationId/read', async (req, res) => {
+  try {
+    const { notificationId } = req.params;
+    await notifications.markNotificationRead(notificationId);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Mark read error:', err);
+    res.status(500).json({ error: 'Failed to mark notification as read' });
   }
 });
 
