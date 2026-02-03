@@ -1199,6 +1199,292 @@ app.get('/api/members/:id/preferences/onboarding-status', async (req, res) => {
   }
 });
 
+// ============================================
+// PUSH NOTIFICATIONS
+// ============================================
+
+const notifications = require('./services/notifications');
+
+/**
+ * @swagger
+ * /api/notifications/broadcast:
+ *   post:
+ *     summary: Send push notification to all members
+ *     tags: [Notifications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - body
+ *             properties:
+ *               title:
+ *                 type: string
+ *               body:
+ *                 type: string
+ *               data:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: Notification sent
+ */
+app.post('/api/notifications/broadcast', async (req, res) => {
+  try {
+    const { title, body, data = {} } = req.body;
+
+    if (!title || !body) {
+      return res.status(400).json({ error: 'Title and body are required' });
+    }
+
+    const result = await notifications.sendToAllMembers(title, body, data);
+
+    // Log the notification
+    await notifications.logNotification(
+      'broadcast',
+      title,
+      body,
+      null,
+      result.sent + result.failed,
+      result.failed === 0 ? 'sent' : 'partial',
+      result.sent,
+      result.failed
+    );
+
+    res.json({
+      success: true,
+      sent: result.sent,
+      failed: result.failed
+    });
+  } catch (err) {
+    console.error('Broadcast notification error:', err);
+    res.status(500).json({ error: 'Failed to send notification' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/notifications/targeted:
+ *   post:
+ *     summary: Send push notification to members matching criteria
+ *     tags: [Notifications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - body
+ *               - criteria
+ *             properties:
+ *               title:
+ *                 type: string
+ *               body:
+ *                 type: string
+ *               criteria:
+ *                 type: object
+ *                 properties:
+ *                   tier:
+ *                     type: string
+ *                     enum: [core, premium]
+ *                   skillLevel:
+ *                     type: string
+ *                     enum: [beginner, intermediate, advanced]
+ *                   playFrequency:
+ *                     type: string
+ *                     enum: [weekly, biweekly, monthly, occasionally]
+ *                   inactiveDays:
+ *                     type: integer
+ *                     description: Members who haven't played in X days
+ *                   activeDays:
+ *                     type: integer
+ *                     description: Members who have played in last X days
+ *                   hasRoundsRemaining:
+ *                     type: boolean
+ *                     description: Members who still have rounds available this month
+ *                   goals:
+ *                     type: array
+ *                     items:
+ *                       type: string
+ *               data:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: Notification sent
+ */
+app.post('/api/notifications/targeted', async (req, res) => {
+  try {
+    const { title, body, criteria, data = {} } = req.body;
+
+    if (!title || !body || !criteria) {
+      return res.status(400).json({ error: 'Title, body, and criteria are required' });
+    }
+
+    const result = await notifications.sendByCriteria(criteria, title, body, data);
+
+    // Log the notification
+    await notifications.logNotification(
+      'targeted',
+      title,
+      body,
+      criteria,
+      result.sent + result.failed,
+      result.failed === 0 ? 'sent' : 'partial',
+      result.sent,
+      result.failed
+    );
+
+    res.json({
+      success: true,
+      sent: result.sent,
+      failed: result.failed,
+      criteria
+    });
+  } catch (err) {
+    console.error('Targeted notification error:', err);
+    res.status(500).json({ error: 'Failed to send notification' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/notifications/member/{memberId}:
+ *   post:
+ *     summary: Send push notification to a specific member
+ *     tags: [Notifications]
+ *     parameters:
+ *       - in: path
+ *         name: memberId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - body
+ *             properties:
+ *               title:
+ *                 type: string
+ *               body:
+ *                 type: string
+ *               data:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: Notification sent
+ */
+app.post('/api/notifications/member/:memberId', async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const { title, body, data = {} } = req.body;
+
+    if (!title || !body) {
+      return res.status(400).json({ error: 'Title and body are required' });
+    }
+
+    const result = await notifications.sendToMember(memberId, title, body, data);
+
+    // Log the notification
+    await notifications.logNotification(
+      'individual',
+      title,
+      body,
+      { memberId },
+      1,
+      result.success ? 'sent' : 'failed',
+      result.success ? 1 : 0,
+      result.success ? 0 : 1
+    );
+
+    res.json(result);
+  } catch (err) {
+    console.error('Individual notification error:', err);
+    res.status(500).json({ error: 'Failed to send notification' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/notifications/history:
+ *   get:
+ *     summary: Get notification history
+ *     tags: [Notifications]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [broadcast, targeted, individual]
+ *     responses:
+ *       200:
+ *         description: List of sent notifications
+ */
+app.get('/api/notifications/history', async (req, res) => {
+  try {
+    const { limit = 50, type } = req.query;
+
+    let query = `
+      SELECT * FROM notification_log
+      ${type ? 'WHERE type = $2' : ''}
+      ORDER BY created_at DESC
+      LIMIT $1
+    `;
+    const params = type ? [limit, type] : [limit];
+
+    const result = await db.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Notification history error:', err);
+    res.status(500).json({ error: 'Failed to fetch notification history' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/notifications/stats:
+ *   get:
+ *     summary: Get notification statistics
+ *     tags: [Notifications]
+ *     responses:
+ *       200:
+ *         description: Notification statistics
+ */
+app.get('/api/notifications/stats', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT
+        COUNT(*) as total_notifications,
+        SUM(sent_count) as total_sent,
+        SUM(failed_count) as total_failed,
+        COUNT(CASE WHEN type = 'broadcast' THEN 1 END) as broadcast_count,
+        COUNT(CASE WHEN type = 'targeted' THEN 1 END) as targeted_count,
+        COUNT(CASE WHEN type = 'individual' THEN 1 END) as individual_count,
+        COUNT(CASE WHEN created_at >= NOW() - INTERVAL '7 days' THEN 1 END) as last_7_days,
+        COUNT(CASE WHEN created_at >= NOW() - INTERVAL '30 days' THEN 1 END) as last_30_days
+      FROM notification_log
+    `);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Notification stats error:', err);
+    res.status(500).json({ error: 'Failed to fetch notification stats' });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`ParPass API running on http://localhost:${PORT}`);
