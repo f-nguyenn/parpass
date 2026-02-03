@@ -1,10 +1,10 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { AuthState, loadMemberFromStorage, setStoredCode, clearStoredCode } from './auth';
-import { getMemberByCode, getMemberUsage } from './api';
+import { getMemberByCode, getMemberUsage, Member } from './api';
 
 interface AuthContextType extends AuthState {
   loading: boolean;
-  login: (code: string) => Promise<void>;
+  login: (code: string) => Promise<Member>;
   logout: () => Promise<void>;
   refreshUsage: () => Promise<void>;
 }
@@ -24,12 +24,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const login = async (code: string) => {
+  const login = async (code: string): Promise<Member> => {
     const memberData = await getMemberByCode(code);
     const usageData = await getMemberUsage(memberData.id);
     await setStoredCode(code);
     setMember(memberData);
     setUsage(usageData);
+    return memberData;
   };
 
   const logout = async () => {

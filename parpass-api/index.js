@@ -1038,6 +1038,167 @@ app.get('/api/courses/:id/rating', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/members/{id}/preferences:
+ *   get:
+ *     summary: Get member's preferences/survey data
+ *     tags: [Members]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Member preferences
+ *       404:
+ *         description: No preferences found
+ *   put:
+ *     summary: Save or update member's preferences/survey data
+ *     tags: [Members]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               skill_level:
+ *                 type: string
+ *                 enum: [beginner, intermediate, advanced]
+ *               goals:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               play_frequency:
+ *                 type: string
+ *                 enum: [weekly, biweekly, monthly, occasionally]
+ *               preferred_time:
+ *                 type: string
+ *                 enum: [morning, afternoon, evening, flexible]
+ *               interests:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               notifications_enabled:
+ *                 type: boolean
+ *               push_token:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Preferences saved
+ */
+app.get('/api/members/:id/preferences', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.query(`
+      SELECT * FROM member_preferences WHERE member_id = $1
+    `, [id]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No preferences found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.put('/api/members/:id/preferences', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      skill_level,
+      goals,
+      play_frequency,
+      preferred_time,
+      interests,
+      notifications_enabled,
+      push_token
+    } = req.body;
+
+    // Check if member exists
+    const memberCheck = await db.query('SELECT id FROM members WHERE id = $1', [id]);
+    if (memberCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    // Upsert preferences
+    const result = await db.query(`
+      INSERT INTO member_preferences (
+        member_id,
+        skill_level,
+        goals,
+        play_frequency,
+        preferred_time,
+        interests,
+        notifications_enabled,
+        push_token,
+        onboarding_completed_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+      ON CONFLICT (member_id)
+      DO UPDATE SET
+        skill_level = COALESCE($2, member_preferences.skill_level),
+        goals = COALESCE($3, member_preferences.goals),
+        play_frequency = COALESCE($4, member_preferences.play_frequency),
+        preferred_time = COALESCE($5, member_preferences.preferred_time),
+        interests = COALESCE($6, member_preferences.interests),
+        notifications_enabled = COALESCE($7, member_preferences.notifications_enabled),
+        push_token = COALESCE($8, member_preferences.push_token),
+        onboarding_completed_at = COALESCE(member_preferences.onboarding_completed_at, NOW())
+      RETURNING *
+    `, [id, skill_level, goals, play_frequency, preferred_time, interests, notifications_enabled, push_token]);
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/members/{id}/preferences/onboarding-status:
+ *   get:
+ *     summary: Check if member has completed onboarding
+ *     tags: [Members]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Onboarding status
+ */
+app.get('/api/members/:id/preferences/onboarding-status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await db.query(`
+      SELECT onboarding_completed_at FROM member_preferences WHERE member_id = $1
+    `, [id]);
+
+    res.json({
+      completed: result.rows.length > 0 && result.rows[0].onboarding_completed_at !== null
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`ParPass API running on http://localhost:${PORT}`);

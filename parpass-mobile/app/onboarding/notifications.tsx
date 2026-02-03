@@ -15,13 +15,40 @@ import {
   saveNotificationPreferences,
   defaultNotificationPrefs,
 } from '../../lib/notifications';
+import { saveMemberPreferences } from '../../lib/api';
+import { useAuth } from '../../lib/AuthContext';
 
 export default function NotificationsScreen() {
   const [loading, setLoading] = useState(false);
   const [prefs, setPrefs] = useState(defaultNotificationPrefs);
+  const { member } = useAuth();
 
   const togglePref = (key: keyof typeof prefs) => {
     setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Sync survey data to backend
+  const syncToBackend = async (notificationsEnabled: boolean, pushToken: string | null) => {
+    if (!member) return;
+
+    const surveyData = await getSurveyData();
+    if (!surveyData) return;
+
+    try {
+      await saveMemberPreferences(member.id, {
+        skill_level: surveyData.skillLevel,
+        goals: surveyData.goals,
+        play_frequency: surveyData.playFrequency,
+        preferred_time: surveyData.preferredTime,
+        interests: surveyData.interests,
+        notifications_enabled: notificationsEnabled,
+        push_token: pushToken,
+      });
+      console.log('Survey data synced to backend');
+    } catch (error) {
+      console.error('Failed to sync survey data to backend:', error);
+      // Don't block the user flow if sync fails - data is still saved locally
+    }
   };
 
   const handleEnableNotifications = async () => {
@@ -30,12 +57,15 @@ export default function NotificationsScreen() {
       const token = await registerForPushNotifications();
 
       if (token) {
-        // Save preferences
+        // Save preferences locally
         await saveNotificationPreferences(prefs);
 
-        // Update survey data
+        // Update survey data locally
         const existing = await getSurveyData() || defaultSurveyData;
         await saveSurveyData({ ...existing, notificationsEnabled: true });
+
+        // Sync to backend
+        await syncToBackend(true, token);
 
         // Send test notification
         await sendTestNotification();
@@ -66,6 +96,10 @@ export default function NotificationsScreen() {
   const handleSkip = async () => {
     const existing = await getSurveyData() || defaultSurveyData;
     await saveSurveyData({ ...existing, notificationsEnabled: false });
+
+    // Sync to backend without notifications
+    await syncToBackend(false, null);
+
     await setOnboardingComplete();
     router.replace('/(tabs)/home');
   };

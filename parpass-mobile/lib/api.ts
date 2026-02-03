@@ -86,3 +86,54 @@ export async function checkIn(memberId: string, courseId: string, holesPlayed: n
   }
   return res.json();
 }
+
+// Member Preferences / Survey API
+
+export interface MemberPreferences {
+  id: string;
+  member_id: string;
+  skill_level: 'beginner' | 'intermediate' | 'advanced' | null;
+  goals: string[];
+  play_frequency: 'weekly' | 'biweekly' | 'monthly' | 'occasionally' | null;
+  preferred_time: 'morning' | 'afternoon' | 'evening' | 'flexible' | null;
+  interests: string[];
+  notifications_enabled: boolean;
+  push_token: string | null;
+  onboarding_completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PreferencesInput {
+  skill_level?: string | null;
+  goals?: string[];
+  play_frequency?: string | null;
+  preferred_time?: string | null;
+  interests?: string[];
+  notifications_enabled?: boolean;
+  push_token?: string | null;
+}
+
+export async function getMemberPreferences(memberId: string): Promise<MemberPreferences | null> {
+  const res = await fetch(`${API_URL}/members/${memberId}/preferences`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('Failed to fetch preferences');
+  return res.json();
+}
+
+export async function saveMemberPreferences(memberId: string, preferences: PreferencesInput): Promise<MemberPreferences> {
+  const res = await fetch(`${API_URL}/members/${memberId}/preferences`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(preferences),
+  });
+  if (!res.ok) throw new Error('Failed to save preferences');
+  return res.json();
+}
+
+export async function getOnboardingStatus(memberId: string): Promise<boolean> {
+  const res = await fetch(`${API_URL}/members/${memberId}/preferences/onboarding-status`);
+  if (!res.ok) return false;
+  const data = await res.json();
+  return data.completed;
+}

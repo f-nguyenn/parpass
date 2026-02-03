@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useAuth } from '../lib/AuthContext';
-import { hasCompletedOnboarding } from '../lib/onboarding';
+import { hasCompletedOnboarding, setOnboardingComplete } from '../lib/onboarding';
+import { getOnboardingStatus } from '../lib/api';
 
 export default function LoginScreen() {
   const [code, setCode] = useState('');
@@ -19,10 +20,31 @@ export default function LoginScreen() {
   const [submitting, setSubmitting] = useState(false);
   const { member, loading, login } = useAuth();
 
+  // Check onboarding status from both local storage and backend
+  const checkOnboardingStatus = async (memberId: string): Promise<boolean> => {
+    // First check local storage (for offline support)
+    const localCompleted = await hasCompletedOnboarding();
+    if (localCompleted) return true;
+
+    // Then check backend (authoritative source)
+    try {
+      const backendCompleted = await getOnboardingStatus(memberId);
+      if (backendCompleted) {
+        // Sync local state with backend
+        await setOnboardingComplete();
+        return true;
+      }
+    } catch (error) {
+      console.log('Could not check backend onboarding status, using local');
+    }
+
+    return false;
+  };
+
   useEffect(() => {
     const checkOnboarding = async () => {
       if (!loading && member) {
-        const completed = await hasCompletedOnboarding();
+        const completed = await checkOnboardingStatus(member.id);
         if (completed) {
           router.replace('/(tabs)/home');
         } else {
@@ -43,9 +65,9 @@ export default function LoginScreen() {
     setError('');
 
     try {
-      await login(code);
+      const loggedInMember = await login(code);
       // Check if user has completed onboarding
-      const completed = await hasCompletedOnboarding();
+      const completed = await checkOnboardingStatus(loggedInMember.id);
       if (completed) {
         router.replace('/(tabs)/home');
       } else {
