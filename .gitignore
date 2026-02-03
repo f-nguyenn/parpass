@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Environment files
+.env
+.env.local
+
+# Build outputs
+.next/
+dist/
+build/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+*.pkl
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Coverage
+coverage/
