@@ -51,7 +51,8 @@ parpass-mobile/
 │       ├── skill-level.tsx
 │       ├── goals.tsx
 │       ├── preferences.tsx
-│       └── notifications.tsx
+│       ├── notifications.tsx
+│       └── complete.tsx    # Cluster assignment reveal
 ├── components/           # Reusable components
 ├── lib/                  # Utilities
 │   ├── api.ts            # API client
@@ -86,6 +87,34 @@ New members complete a survey capturing:
 - View notification history
 - Mark notifications as read
 
+### Personalized Recommendations
+ML-powered features based on member clustering:
+
+**Home Tab**
+- Player Profile card showing assigned cluster (e.g., "Premium Seeker", "Course Explorer")
+- "Recommended For You" horizontal carousel with personalized course suggestions
+- Each recommendation includes a reason explaining why it matches the member's profile
+
+**Courses Tab**
+- "For You" section at the top with cluster-based recommendations
+- Difficulty badges (easy, moderate, challenging, expert) with color coding
+- Personalized recommendation reasons
+
+**Onboarding Completion**
+- After completing the onboarding survey, members see their assigned player profile
+- Cluster-specific icon, color, and description
+- Benefits overview for personalized recommendations
+
+### Player Profile Clusters
+
+| Cluster | Icon | Description |
+|---------|------|-------------|
+| Budget Conscious | 💰 | Values affordable options |
+| Premium Seeker | 💎 | Appreciates quality experiences |
+| Ambitious Improver | 📈 | Focused on getting better |
+| Course Explorer | 🧭 | Loves variety and new experiences |
+| Casual Social | 🤝 | Plays for fun and socializing |
+
 ## API Configuration
 
 Update the API URL in `lib/api.ts`:
@@ -117,6 +146,7 @@ The app uses Expo Router with file-based routing:
 | `/(tabs)/profile` | Profile |
 | `/course/[id]` | Course detail |
 | `/onboarding/*` | Onboarding flow |
+| `/onboarding/complete` | Cluster reveal |
 
 ## Push Notifications
 
