@@ -76,7 +76,7 @@ export default function NotificationsScreen() {
         Alert.alert(
           'Notifications Enabled! 🎉',
           'You\'ll receive a test notification shortly.',
-          [{ text: 'OK', onPress: () => router.replace('/(tabs)/home') }]
+          [{ text: 'OK', onPress: () => router.replace('/onboarding/complete') }]
         );
       } else {
         Alert.alert(
@@ -101,7 +101,7 @@ export default function NotificationsScreen() {
     await syncToBackend(false, null);
 
     await setOnboardingComplete();
-    router.replace('/(tabs)/home');
+    router.replace('/onboarding/complete');
   };
 
   return (

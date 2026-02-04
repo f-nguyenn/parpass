@@ -7,29 +7,47 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  ScrollView,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { getCourses, Course } from '../../lib/api';
+import { getCourses, Course, getClusterRecommendations, RecommendedCourse } from '../../lib/api';
 import { useAuth } from '../../lib/AuthContext';
 
 type FilterType = 'all' | 'core' | 'premium';
 
+function getDifficultyColor(difficulty: string): string {
+  switch (difficulty) {
+    case 'easy': return '#dcfce7';
+    case 'moderate': return '#fef3c7';
+    case 'challenging': return '#fed7aa';
+    case 'expert': return '#fecaca';
+    default: return '#e5e7eb';
+  }
+}
+
 export default function CoursesScreen() {
   const [courses, setCourses] = useState<Course[]>([]);
+  const [recommendations, setRecommendations] = useState<RecommendedCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterType>('all');
   const { member } = useAuth();
 
-  const loadCourses = async (showRefresh = false) => {
+  const loadData = async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
 
     try {
       const tier = filter === 'all' ? undefined : filter;
-      const data = await getCourses(tier);
-      setCourses(data);
+      const [coursesData, recsData] = await Promise.all([
+        getCourses(tier),
+        member ? getClusterRecommendations(member.id, 5) : Promise.resolve(null),
+      ]);
+      setCourses(coursesData);
+      if (recsData?.recommendations) {
+        setRecommendations(recsData.recommendations);
+      }
     } catch (err) {
       console.error('Failed to load courses:', err);
     } finally {
@@ -39,8 +57,8 @@ export default function CoursesScreen() {
   };
 
   useEffect(() => {
-    loadCourses();
-  }, [filter]);
+    loadData();
+  }, [filter, member]);
 
   const canAccess = (course: Course) => {
     if (!member) return false;
@@ -138,12 +156,70 @@ export default function CoursesScreen() {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={() => loadCourses(true)}
+              onRefresh={() => loadData(true)}
               tintColor="#10b981"
             />
           }
           ListHeaderComponent={
-            <Text style={styles.resultCount}>{courses.length} courses available</Text>
+            <>
+              {/* For You Section */}
+              {recommendations.length > 0 && (
+                <View style={styles.forYouSection}>
+                  <View style={styles.forYouHeader}>
+                    <View style={styles.forYouTitleRow}>
+                      <Ionicons name="sparkles" size={20} color="#10b981" />
+                      <Text style={styles.forYouTitle}>For You</Text>
+                    </View>
+                    <Text style={styles.forYouSubtitle}>Based on your player profile</Text>
+                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.recsContainer}
+                  >
+                    {recommendations.map((course) => (
+                      <TouchableOpacity
+                        key={course.id}
+                        style={styles.recCard}
+                        onPress={() => router.push(`/course/${course.id}`)}
+                      >
+                        <View style={styles.recHeader}>
+                          <Text style={styles.recName} numberOfLines={1}>{course.name}</Text>
+                          <View style={[
+                            styles.difficultyBadge,
+                            { backgroundColor: getDifficultyColor(course.difficulty) }
+                          ]}>
+                            <Text style={styles.difficultyText}>{course.difficulty}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.recLocation}>{course.city}, {course.state}</Text>
+                        <View style={styles.recReason}>
+                          <Ionicons name="sparkles" size={14} color="#10b981" />
+                          <Text style={styles.recReasonText} numberOfLines={2}>{course.reason}</Text>
+                        </View>
+                        <View style={styles.recMeta}>
+                          {course.course_rating && (
+                            <Text style={styles.recStat}>Rating: {course.course_rating}</Text>
+                          )}
+                          <View style={[
+                            styles.recTierBadge,
+                            course.tier_required === 'premium' ? styles.tierPremium : styles.tierCore
+                          ]}>
+                            <Text style={[
+                              styles.recTierText,
+                              course.tier_required === 'premium' ? styles.tierPremiumText : styles.tierCoreText
+                            ]}>
+                              {course.tier_required}
+                            </Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+              <Text style={styles.resultCount}>{courses.length} courses available</Text>
+            </>
           }
         />
       )}
@@ -277,5 +353,113 @@ const styles = StyleSheet.create({
   holes: {
     fontSize: 13,
     color: '#9ca3af',
+  },
+  // For You section styles
+  forYouSection: {
+    marginBottom: 20,
+    marginHorizontal: -16,
+    paddingHorizontal: 0,
+  },
+  forYouHeader: {
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  forYouTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  forYouTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  forYouSubtitle: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  recsContainer: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  recCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    width: 280,
+    marginRight: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#ecfdf5',
+  },
+  recHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
+  recName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
+    flex: 1,
+    marginRight: 8,
+  },
+  difficultyBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+  },
+  difficultyText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#374151',
+    textTransform: 'capitalize',
+  },
+  recLocation: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginBottom: 10,
+  },
+  recReason: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  recReasonText: {
+    fontSize: 12,
+    color: '#059669',
+    marginLeft: 6,
+    fontWeight: '500',
+    flex: 1,
+    lineHeight: 18,
+  },
+  recMeta: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  recStat: {
+    fontSize: 12,
+    color: '#9ca3af',
+  },
+  recTierBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  recTierText: {
+    fontSize: 11,
+    fontWeight: '500',
+    textTransform: 'capitalize',
   },
 });

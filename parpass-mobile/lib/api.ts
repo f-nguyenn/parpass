@@ -137,3 +137,79 @@ export async function getOnboardingStatus(memberId: string): Promise<boolean> {
   const data = await res.json();
   return data.completed;
 }
+
+// Clustering & Recommendations API
+
+export interface ClusterInfo {
+  clusterId: number;
+  clusterName: string;
+  description: string;
+  updatedAt: string | null;
+  profile: {
+    skillLevel: string | null;
+    handicap: string | null;
+    budgetPreference: string | null;
+    goals: string[] | null;
+  };
+}
+
+export interface RecommendedCourse {
+  id: string;
+  name: string;
+  city: string;
+  state: string;
+  difficulty: string;
+  course_type: string;
+  price_range: string;
+  tier_required: string;
+  course_rating: string;
+  slope_rating: number;
+  has_driving_range: boolean;
+  has_restaurant: boolean;
+  walking_friendly: boolean;
+  avg_rating: string;
+  review_count: string;
+  reason: string;
+}
+
+export interface ClusterRecommendations {
+  memberId: string;
+  cluster: {
+    id: number;
+    name: string;
+  };
+  recommendations: RecommendedCourse[];
+}
+
+export interface SimilarMember {
+  id: string;
+  first_name: string;
+  skill_level: string;
+  handicap: string;
+  total_rounds: string;
+}
+
+export interface SimilarMembersResponse {
+  clusterId: number;
+  clusterName: string;
+  similarMembers: SimilarMember[];
+}
+
+export async function getMemberCluster(memberId: string): Promise<ClusterInfo | null> {
+  const res = await fetch(`${API_URL}/members/${memberId}/cluster`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('Failed to fetch cluster info');
+  return res.json();
+}
+
+export async function getClusterRecommendations(memberId: string, limit: number = 5): Promise<ClusterRecommendations> {
+  const res = await fetch(`${API_URL}/members/${memberId}/recommendations/cluster?limit=${limit}`);
+  if (!res.ok) throw new Error('Failed to fetch recommendations');
+  return res.json();
+}
+
+export async function getSimilarMembers(memberId: string, limit: number = 5): Promise<SimilarMembersResponse> {
+  const res = await fetch(`${API_URL}/members/${memberId}/similar?limit=${limit}`);
+  if (!res.ok) throw new Error('Failed to fetch similar members');
+  return res.json();
+}
