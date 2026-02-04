@@ -67,6 +67,11 @@ psql -d parpass -f migrations/002_seed_reviews.sql
 psql -d parpass -f migrations/003_add_member_preferences.sql
 psql -d parpass -f migrations/004_add_notification_log.sql
 psql -d parpass -f migrations/005_add_member_notifications.sql
+psql -d parpass -f migrations/006_add_course_attributes.sql
+psql -d parpass -f migrations/007_add_member_skill_data.sql
+psql -d parpass -f migrations/008_seed_course_attributes.sql
+psql -d parpass -f migrations/009_seed_member_skill_data.sql
+psql -d parpass -f migrations/010_seed_more_member_preferences.sql
 ```
 
 ### 2. Start the API
@@ -100,12 +105,17 @@ npx expo start
 ## Features
 
 ### Member Features
-- **Course Discovery** - Browse participating golf courses
+- **Course Discovery** - Browse participating golf courses with detailed attributes
 - **Check-in System** - Check in at courses using member code
 - **Usage Tracking** - Track rounds used vs. available
 - **Favorites** - Save favorite courses
 - **Reviews & Ratings** - Rate and review courses
-- **Personalized Recommendations** - ML-powered course suggestions
+- **Personalized Recommendations** - ML-powered course suggestions based on member clustering
+
+### ML-Powered Features
+- **Member Clustering** - Members segmented into 5 behavioral clusters
+- **Cluster-Based Recommendations** - Courses matched to member profile
+- **Similar Members** - Find members with similar preferences
 
 ### Mobile-Specific Features
 - **Onboarding Survey** - Capture skill level, goals, preferences
@@ -118,6 +128,7 @@ npx expo start
   - Targeted notifications by criteria (tier, skill level, activity)
   - Individual member notifications
   - Notification history & analytics
+- **Cluster Analytics** - View member segment statistics
 
 ## API Endpoints
 
@@ -155,6 +166,15 @@ npx expo start
 | GET | `/api/members/:id/favorites` | Get member's favorites |
 | POST | `/api/members/:id/favorites` | Add favorite |
 | DELETE | `/api/members/:id/favorites/:courseId` | Remove favorite |
+
+### Recommendations & Clustering
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/members/:id/cluster` | Get member's cluster/segment info |
+| GET | `/api/members/:id/recommendations` | Get basic recommendations |
+| GET | `/api/members/:id/recommendations/cluster` | Get ML-powered recommendations |
+| GET | `/api/members/:id/similar` | Find similar members in cluster |
+| GET | `/api/clusters/stats` | Get cluster statistics |
 
 ## Database Schema
 
@@ -245,6 +265,25 @@ curl -X POST http://localhost:3001/api/notifications/targeted \
     "body": "Come back and play",
     "criteria": {"inactiveDays": 14, "tier": "premium"}
   }'
+```
+
+## Member Clustering
+
+Members are automatically segmented into 5 behavioral clusters:
+
+| Cluster | Description | Recommendation Strategy |
+|---------|-------------|------------------------|
+| **Budget Conscious** | Values affordable options | Prioritize budget-friendly courses |
+| **Premium Seeker** | Appreciates quality experiences | Recommend luxury/premium courses |
+| **Ambitious Improver** | Focused on getting better | Courses with practice facilities |
+| **Course Explorer** | Loves variety and new experiences | Unique course types, variety |
+| **Casual Social** | Plays for fun and socializing | Easy courses with restaurants |
+
+Run clustering model:
+```bash
+cd parpass-data
+source venv/bin/activate
+python member_clustering.py
 ```
 
 ## License

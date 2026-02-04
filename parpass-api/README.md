@@ -52,7 +52,12 @@ parpass-api/
 │   ├── 002_seed_reviews.sql
 │   ├── 003_add_member_preferences.sql
 │   ├── 004_add_notification_log.sql
-│   └── 005_add_member_notifications.sql
+│   ├── 005_add_member_notifications.sql
+│   ├── 006_add_course_attributes.sql
+│   ├── 007_add_member_skill_data.sql
+│   ├── 008_seed_course_attributes.sql
+│   ├── 009_seed_member_skill_data.sql
+│   └── 010_seed_more_member_preferences.sql
 ├── services/
 │   └── notifications.js  # Push notification service
 └── __tests__/            # Test files
@@ -107,6 +112,13 @@ for f in migrations/*.sql; do psql -d parpass -f "$f"; done
 - `GET /api/health-plans` - List health plans
 - `GET /api/health-plans/:id` - Get health plan details
 
+### Recommendations & Clustering
+- `GET /api/members/:id/cluster` - Get member's cluster info
+- `GET /api/members/:id/recommendations` - Basic recommendations
+- `GET /api/members/:id/recommendations/cluster` - ML-powered recommendations
+- `GET /api/members/:id/similar` - Find similar members
+- `GET /api/clusters/stats` - Cluster statistics
+
 ## Notification Service
 
 The notification service (`services/notifications.js`) provides:
@@ -147,3 +159,30 @@ npm run test:coverage
 | `npm test` | Run tests |
 | `npm run test:watch` | Run tests in watch mode |
 | `npm run test:coverage` | Run tests with coverage |
+
+## Course Attributes
+
+Courses now include detailed attributes for recommendations:
+
+| Attribute | Description |
+|-----------|-------------|
+| `difficulty` | easy, moderate, challenging, expert |
+| `course_type` | public, semi-private, resort, links, parkland, desert |
+| `price_range` | budget, moderate, premium, luxury |
+| `course_rating` | USGA course rating |
+| `slope_rating` | USGA slope rating (55-155) |
+| `has_driving_range` | Practice facilities |
+| `has_restaurant` | Dining on-site |
+| `walking_friendly` | Suitable for walking |
+
+## Member Clusters
+
+Members are assigned to behavioral clusters:
+
+| Cluster ID | Name | Description |
+|------------|------|-------------|
+| 0 | Budget Conscious | Values affordable options |
+| 1 | Premium Seeker | Appreciates quality experiences |
+| 2 | Ambitious Improver | Focused on getting better |
+| 3 | Course Explorer | Loves variety |
+| 4 | Casual Social | Plays for fun/social |
