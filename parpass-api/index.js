@@ -1594,6 +1594,377 @@ app.post('/api/notifications/:notificationId/read', async (req, res) => {
   }
 });
 
+// ============================================
+// RECOMMENDATIONS & CLUSTERING
+// ============================================
+
+// Cluster names mapping
+const CLUSTER_NAMES = {
+  0: 'Budget Conscious',
+  1: 'Premium Seeker',
+  2: 'Ambitious Improver',
+  3: 'Course Explorer',
+  4: 'Casual Social'
+};
+
+/**
+ * @swagger
+ * /api/members/{memberId}/cluster:
+ *   get:
+ *     summary: Get member's cluster/segment info
+ *     tags: [Recommendations]
+ *     parameters:
+ *       - in: path
+ *         name: memberId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Member cluster information
+ */
+app.get('/api/members/:memberId/cluster', async (req, res) => {
+  try {
+    const { memberId } = req.params;
+
+    const result = await db.query(`
+      SELECT
+        mp.cluster_id,
+        mp.cluster_updated_at,
+        mp.skill_level,
+        mp.handicap,
+        mp.budget_preference,
+        mp.goals
+      FROM member_preferences mp
+      WHERE mp.member_id = $1
+    `, [memberId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Member preferences not found' });
+    }
+
+    const prefs = result.rows[0];
+    const clusterId = prefs.cluster_id;
+    const clusterName = CLUSTER_NAMES[clusterId] || 'Unknown';
+
+    // Get cluster description
+    const clusterDescriptions = {
+      'Budget Conscious': 'Values affordable options and good deals. Prefers courses that offer great value.',
+      'Premium Seeker': 'Appreciates quality experiences. Willing to pay more for better courses and amenities.',
+      'Ambitious Improver': 'Focused on getting better. Plays frequently and seeks courses that challenge their skills.',
+      'Course Explorer': 'Loves variety and trying new courses. Willing to travel for unique experiences.',
+      'Casual Social': 'Plays for fun and relaxation. Enjoys the social aspects of golf.'
+    };
+
+    res.json({
+      clusterId,
+      clusterName,
+      description: clusterDescriptions[clusterName] || '',
+      updatedAt: prefs.cluster_updated_at,
+      profile: {
+        skillLevel: prefs.skill_level,
+        handicap: prefs.handicap,
+        budgetPreference: prefs.budget_preference,
+        goals: prefs.goals
+      }
+    });
+  } catch (err) {
+    console.error('Cluster fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch cluster info' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/members/{memberId}/recommendations/cluster:
+ *   get:
+ *     summary: Get cluster-based course recommendations (ML-powered)
+ *     tags: [Recommendations]
+ *     parameters:
+ *       - in: path
+ *         name: memberId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 5
+ *     responses:
+ *       200:
+ *         description: List of recommended courses based on member cluster
+ */
+app.get('/api/members/:memberId/recommendations/cluster', async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const { limit = 5 } = req.query;
+
+    // Get member profile and cluster
+    const memberResult = await db.query(`
+      SELECT
+        m.id,
+        pt.name as tier,
+        mp.cluster_id,
+        mp.skill_level,
+        mp.handicap,
+        mp.budget_preference,
+        mp.preferred_difficulty,
+        mp.max_travel_miles,
+        mp.goals
+      FROM members m
+      JOIN health_plans hp ON m.health_plan_id = hp.id
+      JOIN plan_tiers pt ON hp.plan_tier_id = pt.id
+      LEFT JOIN member_preferences mp ON m.id = mp.member_id
+      WHERE m.id = $1
+    `, [memberId]);
+
+    if (memberResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Member not found' });
+    }
+
+    const member = memberResult.rows[0];
+    const isPremium = member.tier === 'premium';
+    const clusterId = member.cluster_id;
+    const clusterName = CLUSTER_NAMES[clusterId] || 'Unknown';
+
+    // Get courses the member has already played
+    const playedResult = await db.query(`
+      SELECT DISTINCT course_id FROM golf_utilization WHERE member_id = $1
+    `, [memberId]);
+    const playedCourseIds = playedResult.rows.map(r => r.course_id);
+
+    // Build recommendation query based on cluster profile
+    let orderBy = '';
+    let conditions = [];
+
+    // Tier access control
+    if (!isPremium) {
+      conditions.push("gc.tier_required = 'core'");
+    }
+
+    // Exclude already played courses
+    if (playedCourseIds.length > 0) {
+      conditions.push(`gc.id NOT IN ('${playedCourseIds.join("','")}')`);
+    }
+
+    // Cluster-specific ordering
+    switch (clusterName) {
+      case 'Budget Conscious':
+        orderBy = "CASE gc.price_range WHEN 'budget' THEN 1 WHEN 'moderate' THEN 2 ELSE 3 END, gc.slope_rating";
+        break;
+      case 'Premium Seeker':
+        orderBy = "CASE gc.price_range WHEN 'luxury' THEN 1 WHEN 'premium' THEN 2 ELSE 3 END DESC, gc.course_rating DESC";
+        break;
+      case 'Ambitious Improver':
+        // Match difficulty to skill level, slight challenge
+        if (member.preferred_difficulty) {
+          conditions.push(`gc.difficulty IN ('${member.preferred_difficulty}', 'moderate', 'challenging')`);
+        }
+        orderBy = "gc.slope_rating DESC, gc.has_driving_range DESC, gc.has_practice_green DESC";
+        break;
+      case 'Course Explorer':
+        // Prioritize variety and unique experiences
+        orderBy = "CASE gc.course_type WHEN 'links' THEN 1 WHEN 'resort' THEN 2 WHEN 'parkland' THEN 3 ELSE 4 END, RANDOM()";
+        break;
+      case 'Casual Social':
+        // Easy courses with good amenities
+        orderBy = "CASE gc.difficulty WHEN 'easy' THEN 1 WHEN 'moderate' THEN 2 ELSE 3 END, gc.has_restaurant DESC, gc.pace_of_play_mins";
+        break;
+      default:
+        orderBy = "gc.course_rating DESC";
+    }
+
+    const query = `
+      SELECT
+        gc.id,
+        gc.name,
+        gc.city,
+        gc.state,
+        gc.difficulty,
+        gc.course_type,
+        gc.price_range,
+        gc.tier_required,
+        gc.course_rating,
+        gc.slope_rating,
+        gc.has_driving_range,
+        gc.has_restaurant,
+        gc.walking_friendly,
+        COALESCE(r.avg_rating, 0) as avg_rating,
+        COALESCE(r.review_count, 0) as review_count
+      FROM golf_courses gc
+      LEFT JOIN (
+        SELECT course_id, AVG(rating) as avg_rating, COUNT(*) as review_count
+        FROM reviews GROUP BY course_id
+      ) r ON gc.id = r.course_id
+      WHERE gc.is_active = true
+      ${conditions.length > 0 ? 'AND ' + conditions.join(' AND ') : ''}
+      ORDER BY ${orderBy}
+      LIMIT $1
+    `;
+
+    const coursesResult = await db.query(query, [limit]);
+
+    // Add recommendation reasons
+    const recommendations = coursesResult.rows.map(course => {
+      let reason = '';
+      switch (clusterName) {
+        case 'Budget Conscious':
+          reason = course.price_range === 'budget' ? 'Great value option' : 'Affordable for your budget';
+          break;
+        case 'Premium Seeker':
+          reason = course.price_range === 'luxury' || course.price_range === 'premium'
+            ? 'Premium experience' : 'Highly rated course';
+          break;
+        case 'Ambitious Improver':
+          reason = course.has_driving_range ? 'Has practice facilities' : 'Good for skill development';
+          break;
+        case 'Course Explorer':
+          reason = `Try this ${course.course_type} course`;
+          break;
+        case 'Casual Social':
+          reason = course.has_restaurant ? 'Great for socializing' : 'Relaxed atmosphere';
+          break;
+        default:
+          reason = 'Recommended for you';
+      }
+
+      return {
+        ...course,
+        reason
+      };
+    });
+
+    res.json({
+      memberId,
+      cluster: {
+        id: clusterId,
+        name: clusterName
+      },
+      recommendations
+    });
+  } catch (err) {
+    console.error('Recommendations error:', err);
+    res.status(500).json({ error: 'Failed to fetch recommendations' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/members/{memberId}/similar:
+ *   get:
+ *     summary: Find members in the same cluster
+ *     tags: [Recommendations]
+ *     parameters:
+ *       - in: path
+ *         name: memberId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 5
+ *     responses:
+ *       200:
+ *         description: List of similar members
+ */
+app.get('/api/members/:memberId/similar', async (req, res) => {
+  try {
+    const { memberId } = req.params;
+    const { limit = 5 } = req.query;
+
+    // Get member's cluster
+    const memberResult = await db.query(`
+      SELECT cluster_id FROM member_preferences WHERE member_id = $1
+    `, [memberId]);
+
+    if (memberResult.rows.length === 0 || memberResult.rows[0].cluster_id === null) {
+      return res.status(404).json({ error: 'Member cluster not found' });
+    }
+
+    const clusterId = memberResult.rows[0].cluster_id;
+
+    // Get other members in same cluster
+    const similarResult = await db.query(`
+      SELECT
+        m.id,
+        m.first_name,
+        mp.skill_level,
+        mp.handicap,
+        COALESCE(u.total_rounds, 0) as total_rounds
+      FROM members m
+      JOIN member_preferences mp ON m.id = mp.member_id
+      LEFT JOIN (
+        SELECT member_id, COUNT(*) as total_rounds
+        FROM golf_utilization GROUP BY member_id
+      ) u ON m.id = u.member_id
+      WHERE mp.cluster_id = $1 AND m.id != $2
+      ORDER BY u.total_rounds DESC
+      LIMIT $3
+    `, [clusterId, memberId, limit]);
+
+    res.json({
+      clusterId,
+      clusterName: CLUSTER_NAMES[clusterId],
+      similarMembers: similarResult.rows
+    });
+  } catch (err) {
+    console.error('Similar members error:', err);
+    res.status(500).json({ error: 'Failed to fetch similar members' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/clusters/stats:
+ *   get:
+ *     summary: Get cluster statistics
+ *     tags: [Recommendations]
+ *     responses:
+ *       200:
+ *         description: Cluster statistics
+ */
+app.get('/api/clusters/stats', async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT
+        mp.cluster_id,
+        COUNT(*) as member_count,
+        AVG(mp.handicap) as avg_handicap,
+        AVG(CASE mp.budget_preference
+          WHEN 'budget' THEN 1
+          WHEN 'moderate' THEN 2
+          WHEN 'premium' THEN 3
+          ELSE 2 END) as avg_budget_score,
+        AVG(COALESCE(u.total_rounds, 0)) as avg_rounds
+      FROM member_preferences mp
+      LEFT JOIN (
+        SELECT member_id, COUNT(*) as total_rounds
+        FROM golf_utilization GROUP BY member_id
+      ) u ON mp.member_id = u.member_id
+      WHERE mp.cluster_id IS NOT NULL
+      GROUP BY mp.cluster_id
+      ORDER BY mp.cluster_id
+    `);
+
+    const stats = result.rows.map(row => ({
+      clusterId: row.cluster_id,
+      clusterName: CLUSTER_NAMES[row.cluster_id],
+      memberCount: parseInt(row.member_count),
+      avgHandicap: parseFloat(row.avg_handicap).toFixed(1),
+      avgBudgetScore: parseFloat(row.avg_budget_score).toFixed(2),
+      avgRounds: parseFloat(row.avg_rounds).toFixed(1)
+    }));
+
+    res.json(stats);
+  } catch (err) {
+    console.error('Cluster stats error:', err);
+    res.status(500).json({ error: 'Failed to fetch cluster stats' });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`ParPass API running on http://localhost:${PORT}`);
